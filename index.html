@@ -7,19 +7,19 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 20px; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f2f5; margin: 20px; }
         .container { max-width: 1100px; margin: auto; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        h1 { text-align: center; color: #1a73e8; margin-bottom: 30px; }
-        .chart-container { margin-bottom: 50px; height: 400px; width: 100%; }
+        h1 { text-align: center; color: #2c3e50; margin-bottom: 30px; }
+        .chart-container { margin-bottom: 50px; height: 450px; width: 100%; }
         .stats { display: flex; justify-content: center; gap: 20px; margin-bottom: 30px; flex-wrap: wrap; }
-        .stat-box { padding: 20px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 10px; min-width: 200px; text-align: center; }
-        .stat-box strong { font-size: 24px; color: #1a73e8; display: block; margin-top: 10px; }
+        .stat-box { padding: 20px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 10px; min-width: 200px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .stat-box strong { font-size: 26px; color: #1a73e8; display: block; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>ระบบวิเคราะห์การใช้ไฟฟ้า (Nakornin)</h1>
+    <h1>ระบบวิเคราะห์การใช้ไฟฟ้า (E_PC473)</h1>
     
     <div class="stats">
         <div class="stat-box">การใช้ไฟวันนี้ (รวม) <strong id="todayTotal">0</strong> kWh</div>
@@ -27,11 +27,11 @@
     </div>
 
     <div class="chart-container">
-        <canvas id="todayBarChart"></canvas>
+        <canvas id="hourlyMixedChart"></canvas>
     </div>
 
     <div class="chart-container">
-        <canvas id="averageLineChart"></canvas>
+        <canvas id="weeklyMixedChart"></canvas>
     </div>
 </div>
 
@@ -41,6 +41,7 @@
     function parseDate(dateStr) {
         if (!dateStr) return new Date(NaN);
         const parts = dateStr.split(' ');
+        if(parts.length < 2) return new Date(NaN);
         const d = parts[0].split('/');
         return new Date(`${d[2]}-${d[1]}-${d[0]}T${parts[1]}`);
     }
@@ -59,79 +60,143 @@
         const latest = cleanData[cleanData.length - 1];
         document.getElementById('currentPower').innerText = latest['Total Power (W)'] || 0;
 
-        // เตรียมข้อมูล 24 ชั่วโมง (0-23)
-        const hours = Array.from({length: 24}, (_, i) => i);
-        const todayUsage = new Array(24).fill(0);
-        const avgSums = new Array(24).fill(0);
-        const avgCounts = new Array(24).fill(0);
+        const now = new Date();
+        const todayStr = now.toDateString();
+        
+        // หาค่าเริ่มต้นของสัปดาห์นี้ (วันอาทิตย์)
+        const currentWeekStart = new Date(now);
+        currentWeekStart.setDate(now.getDate() - now.getDay());
+        currentWeekStart.setHours(0,0,0,0);
 
-        const todayStr = new Date().toDateString();
+        // --- ตัวแปรสำหรับกราฟ 24 ชั่วโมง ---
+        const hoursLabel = Array.from({length: 24}, (_, i) => i); // 0, 1, 2... 23
+        const todayHourlyUsage = new Array(24).fill(0);
+        const sumHourly = new Array(24).fill(0);
+        const countHourly = new Array(24).fill(0);
 
+        // --- ตัวแปรสำหรับกราฟ 7 วัน ---
+        const weekDaysLabel = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+        const thisWeekUsage = new Array(7).fill(0);
+        
+        // ตัวแปรช่วยคำนวณค่าเฉลี่ยรายวัน
+        const dailySums = {}; 
+
+        // วนลูปอ่านข้อมูลทั้งหมด
         cleanData.forEach(d => {
             const date = parseDate(d['Date-Time']);
             if (isNaN(date)) return;
             
-            const h = date.getHours();
             const val = d['Usage (kWh)'] || 0;
+            const h = date.getHours();
+            const day = date.getDay();
+            const dateOnly = date.toDateString();
 
-            // ข้อมูลของวันนี้
-            if (date.toDateString() === todayStr) {
-                todayUsage[h] += val;
+            // 1. เก็บข้อมูลรายชั่วโมง
+            if (dateOnly === todayStr) {
+                todayHourlyUsage[h] += val;
             }
+            sumHourly[h] += val;
+            countHourly[h]++;
 
-            // ข้อมูลสำหรับค่าเฉลี่ยรายชั่วโมง (จากประวัติทั้งหมด)
-            avgSums[h] += val;
-            avgCounts[h]++;
+            // 2. เก็บข้อมูลรายวัน (รวมยอดของแต่ละวัน)
+            if (!dailySums[dateOnly]) dailySums[dateOnly] = { dayIndex: day, total: 0 };
+            dailySums[dateOnly].total += val;
+
+            // ตรวจสอบว่าเป็นข้อมูลของสัปดาห์นี้หรือไม่
+            if (date >= currentWeekStart) {
+                thisWeekUsage[day] += val;
+            }
         });
 
-        const hourlyAverage = avgSums.map((sum, i) => avgCounts[i] > 0 ? (sum / (avgCounts[i]/24)).toFixed(2) : 0);
-        document.getElementById('todayTotal').innerText = todayUsage.reduce((a, b) => a + b, 0).toFixed(2);
+        // คำนวณค่าเฉลี่ยรายชั่วโมง
+        const avgHourlyUsage = sumHourly.map((sum, i) => countHourly[i] > 0 ? Number((sum / countHourly[i]).toFixed(2)) : 0);
 
-        renderCharts(hours, todayUsage, hourlyAverage);
+        // คำนวณค่าเฉลี่ยรายสัปดาห์ (หาผลรวมแต่ละวันในสัปดาห์ แล้วหารด้วยจำนวนสัปดาห์ที่มีข้อมูล)
+        const sumWeekDays = new Array(7).fill(0);
+        const countWeekDays = new Array(7).fill(0);
+        
+        for (const dateKey in dailySums) {
+            const dData = dailySums[dateKey];
+            sumWeekDays[dData.dayIndex] += dData.total;
+            countWeekDays[dData.dayIndex]++;
+        }
+        const avgWeeklyUsage = sumWeekDays.map((sum, i) => countWeekDays[i] > 0 ? Number((sum / countWeekDays[i]).toFixed(2)) : 0);
+
+        // อัปเดตตัวเลขรวมด้านบน
+        document.getElementById('todayTotal').innerText = todayHourlyUsage.reduce((a, b) => a + b, 0).toFixed(2);
+
+        renderCharts(hoursLabel, todayHourlyUsage, avgHourlyUsage, weekDaysLabel, thisWeekUsage, avgWeeklyUsage);
     }
 
-    let barChart, lineChart;
+    let hourlyChart, weeklyChart;
 
-    function renderCharts(labels, todayData, avgData) {
-        if (barChart) barChart.destroy();
-        if (lineChart) lineChart.destroy();
+    function renderCharts(hLabels, todayHourly, avgHourly, wLabels, thisWeek, avgWeek) {
+        if (hourlyChart) hourlyChart.destroy();
+        if (weeklyChart) weeklyChart.destroy();
 
-        // 1. กราฟวันนี้ (Bar Graph)
-        barChart = new Chart(document.getElementById('todayBarChart'), {
-            type: 'bar',
+        // 1. กราฟรายชั่วโมง (Mixed Chart: Bar + Line)
+        hourlyChart = new Chart(document.getElementById('hourlyMixedChart'), {
+            type: 'bar', // Base type
             data: {
-                labels: labels,
-                datasets: [{
-                    label: 'การใช้ไฟวันนี้ (kWh)',
-                    data: todayData,
-                    backgroundColor: 'rgba(52, 152, 219, 0.7)',
-                    borderColor: '#2980b9',
-                    borderWidth: 1
-                }]
+                labels: hLabels,
+                datasets: [
+                    {
+                        type: 'line',
+                        label: 'ค่าเฉลี่ยรายชั่วโมง (kWh)',
+                        data: avgHourly,
+                        borderColor: '#e74c3c', // สีแดง
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        tension: 0.4, // เส้นโค้ง
+                        order: 1 // ให้อยู่ด้านหน้า
+                    },
+                    {
+                        type: 'bar',
+                        label: 'การใช้ไฟวันนี้ (kWh)',
+                        data: todayHourly,
+                        backgroundColor: 'rgba(52, 152, 219, 0.8)', // สีฟ้า
+                        borderRadius: 4,
+                        order: 2 // ให้อยู่ด้านหลัง
+                    }
+                ]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { title: { display: true, text: 'ปริมาณการใช้ไฟรายชั่วโมง (วันนี้)' } }
+                plugins: { title: { display: true, text: 'เปรียบเทียบการใช้ไฟรายชั่วโมง (วันนี้ vs ค่าเฉลี่ย)', font: { size: 16 } } },
+                scales: { y: { beginAtZero: true } }
             }
         });
 
-        // 2. กราฟค่าเฉลี่ย (Line Graph)
-        lineChart = new Chart(document.getElementById('averageLineChart'), {
-            type: 'line',
+        // 2. กราฟรายสัปดาห์ (Mixed Chart: Bar + Line)
+        weeklyChart = new Chart(document.getElementById('weeklyMixedChart'), {
+            type: 'bar', // Base type
             data: {
-                labels: labels,
-                datasets: [{
-                    label: 'ค่าเฉลี่ยการใช้ไฟรายชั่วโมง (kWh)',
-                    data: avgData,
-                    borderColor: '#2ecc71',
-                    backgroundColor: 'rgba(46, 204, 113, 0.1)',
-                    fill: true,
-                    tension: 0.4 // เส้นโค้ง
-                }]
+                labels: wLabels,
+                datasets: [
+                    {
+                        type: 'line',
+                        label: 'ค่าเฉลี่ยรายวัน (kWh)',
+                        data: avgWeek,
+                        borderColor: '#f39c12', // สีส้ม
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        order: 1
+                    },
+                    {
+                        type: 'bar',
+                        label: 'การใช้ไฟสัปดาห์นี้ (kWh)',
+                        data: thisWeek,
+                        backgroundColor: 'rgba(46, 204, 113, 0.8)', // สีเขียว
+                        borderRadius: 4,
+                        order: 2
+                    }
+                ]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { title: { display: true, text: 'แนวโน้มการใช้ไฟเฉลี่ยรายชั่วโมง (Load Profile)' } }
+                plugins: { title: { display: true, text: 'เปรียบเทียบการใช้ไฟรายวัน (สัปดาห์นี้ vs ค่าเฉลี่ย)', font: { size: 16 } } },
+                scales: { y: { beginAtZero: true } }
             }
         });
     }
