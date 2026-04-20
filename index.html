@@ -3,161 +3,141 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>E_PC473 Electricity Dashboard</title>
+    <title>Dashboard การใช้ไฟฟ้า Nakornin</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; margin: 20px; }
-        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        h1 { text-align: center; color: #2c3e50; }
-        .chart-container { margin-bottom: 40px; position: relative; height: 40vh; width: 100%; }
-        .stats { display: flex; justify-content: space-around; margin-bottom: 20px; text-align: center; flex-wrap: wrap; }
-        .stat-box { padding: 15px; background: #ecf0f1; border-radius: 8px; flex: 1; margin: 5px 10px; min-width: 150px; }
+        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 20px; }
+        .container { max-width: 1100px; margin: auto; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #1a73e8; margin-bottom: 30px; }
+        .chart-container { margin-bottom: 50px; height: 400px; width: 100%; }
+        .stats { display: flex; justify-content: center; gap: 20px; margin-bottom: 30px; flex-wrap: wrap; }
+        .stat-box { padding: 20px; background: #ffffff; border: 1px solid #e0e0e0; border-radius: 10px; min-width: 200px; text-align: center; }
+        .stat-box strong { font-size: 24px; color: #1a73e8; display: block; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>ระบบมอนิเตอร์ไฟฟ้า 3 เฟส (PC473)</h1>
+    <h1>ระบบวิเคราะห์การใช้ไฟฟ้า (Nakornin)</h1>
     
     <div class="stats">
-        <div class="stat-box">
-            <div>การใช้ไฟรอบล่าสุด</div>
-            <strong id="currentUsage">0</strong> kWh
-        </div>
-        <div class="stat-box">
-            <div>กำลังไฟปัจจุบัน</div>
-            <strong id="currentPower">0</strong> W
-        </div>
+        <div class="stat-box">การใช้ไฟวันนี้ (รวม) <strong id="todayTotal">0</strong> kWh</div>
+        <div class="stat-box">กำลังไฟปัจจุบัน <strong id="currentPower">0</strong> W</div>
     </div>
 
     <div class="chart-container">
-        <canvas id="hourlyChart"></canvas>
+        <canvas id="todayBarChart"></canvas>
     </div>
 
     <div class="chart-container">
-        <canvas id="weeklyChart"></canvas>
+        <canvas id="averageLineChart"></canvas>
     </div>
 </div>
 
 <script>
-    // *** สำคัญ: วาง URL ของคุณตรงนี้ ***
-    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQPE61vZhx8Fi4_SEQyWuk-aA7FHGryhx5ff_wIgxhpVWMxULlCRUGbgPwG17OTK4phtAHWdTZ7ik8h/pub?gid=0&single=true&output=csv'; 
+    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQPE61vZhx8Fi4_SEQyWuk-aA7FHGryhx5ff_wIgxhpVWMxULlCRUGbgPwG17OTK4phtAHWdTZ7ik8h/pub?gid=0&single=true&output=csv'; // *** วาง URL ของคุณที่นี่ ***
 
-    function parseCustomDate(dateStr) {
-        if (!dateStr || typeof dateStr !== 'string') return new Date(NaN);
+    function parseDate(dateStr) {
+        if (!dateStr) return new Date(NaN);
         const parts = dateStr.split(' ');
-        if (parts.length < 2) return new Date(NaN);
-        
-        const dateParts = parts[0].split('/');
-        if (dateParts.length !== 3) return new Date(NaN);
-        
-        const isoString = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}T${parts[1]}`;
-        return new Date(isoString);
+        const d = parts[0].split('/');
+        return new Date(`${d[2]}-${d[1]}-${d[0]}T${parts[1]}`);
     }
 
     async function fetchData() {
         Papa.parse(CSV_URL, {
-            download: true,
-            header: true,
-            dynamicTyping: true,
-            complete: function(results) {
-                processData(results.data);
-            }
+            download: true, header: true, dynamicTyping: true,
+            complete: function(results) { processData(results.data); }
         });
     }
 
     function processData(data) {
-        const cleanData = data.filter(d => d['Date-Time'] != null && d['Date-Time'].toString().trim() !== "");
-        if(cleanData.length === 0) return;
+        const cleanData = data.filter(d => d['Date-Time']);
+        if (cleanData.length === 0) return;
 
-        // 1. ช่องสถิติด้านบน (ดึงแถวสุดท้าย)
         const latest = cleanData[cleanData.length - 1];
         document.getElementById('currentPower').innerText = latest['Total Power (W)'] || 0;
-        let usageVal = latest['Usage (kWh)'] || 0;
-        document.getElementById('currentUsage').innerText = typeof usageVal === 'number' ? usageVal.toFixed(2) : usageVal;
-        
-        // --- 2. ลอจิกใหม่สำหรับกราฟรายชั่วโมง (0:00 - 23:00 ของวันนี้) ---
-        const now = new Date();
-        const todayString = now.toDateString(); // ดึงค่า "วันที่ปัจจุบัน" เพื่อไว้เทียบ
-        
-        // สร้าง Array รอรับข้อมูล 24 ชั่วโมง (0-23)
-        const hourlyLabels = Array.from({length: 24}, (_, i) => `${i}:00`);
-        const hourlyUsage = new Array(24).fill(0); // เติม 0 ไว้ก่อนทั้ง 24 ช่อง
+
+        // เตรียมข้อมูล 24 ชั่วโมง (0-23)
+        const hours = Array.from({length: 24}, (_, i) => i);
+        const todayUsage = new Array(24).fill(0);
+        const avgSums = new Array(24).fill(0);
+        const avgCounts = new Array(24).fill(0);
+
+        const todayStr = new Date().toDateString();
 
         cleanData.forEach(d => {
-            const dateObj = parseCustomDate(d['Date-Time']);
-            if(!isNaN(dateObj)) {
-                // เช็คว่าแถวนี้เป็นข้อมูลของ "วันนี้" หรือไม่
-                if(dateObj.toDateString() === todayString) {
-                    const hour = dateObj.getHours(); // ได้ค่า 0-23
-                    // เอา Usage ไปบวกเข้าช่องของชั่วโมงนั้นๆ 
-                    // (บวกสะสมไว้ เผื่อใน 1 ชม. มีหลายแถว)
-                    hourlyUsage[hour] += (d['Usage (kWh)'] || 0); 
-                }
+            const date = parseDate(d['Date-Time']);
+            if (isNaN(date)) return;
+            
+            const h = date.getHours();
+            const val = d['Usage (kWh)'] || 0;
+
+            // ข้อมูลของวันนี้
+            if (date.toDateString() === todayStr) {
+                todayUsage[h] += val;
             }
+
+            // ข้อมูลสำหรับค่าเฉลี่ยรายชั่วโมง (จากประวัติทั้งหมด)
+            avgSums[h] += val;
+            avgCounts[h]++;
         });
 
-        // ปัดเศษทศนิยม 2 ตำแหน่งให้สวยงาม
-        const roundedHourlyUsage = hourlyUsage.map(val => Number(val.toFixed(2)));
+        const hourlyAverage = avgSums.map((sum, i) => avgCounts[i] > 0 ? (sum / (avgCounts[i]/24)).toFixed(2) : 0);
+        document.getElementById('todayTotal').innerText = todayUsage.reduce((a, b) => a + b, 0).toFixed(2);
 
-
-        // --- 3. ข้อมูลกราฟรายสัปดาห์ (แยกจันทร์-อาทิตย์) เหมือนเดิม ---
-        const weekDays = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
-        const weeklyData = [0, 0, 0, 0, 0, 0, 0];
-
-        cleanData.forEach(d => {
-            const dateObj = parseCustomDate(d['Date-Time']);
-            if(!isNaN(dateObj)) {
-                const dayIndex = dateObj.getDay();
-                weeklyData[dayIndex] += (d['Usage (kWh)'] || 0);
-            }
-        });
-
-        const roundedWeeklyData = weeklyData.map(val => Number(val.toFixed(2)));
-
-        renderCharts(hourlyLabels, roundedHourlyUsage, weekDays, roundedWeeklyData);
+        renderCharts(hours, todayUsage, hourlyAverage);
     }
 
-    let hourlyChartInstance = null;
-    let weeklyChartInstance = null;
+    let barChart, lineChart;
 
-    function renderCharts(hLabels, hData, wLabels, wData) {
-        if(hourlyChartInstance) hourlyChartInstance.destroy();
-        if(weeklyChartInstance) weeklyChartInstance.destroy();
+    function renderCharts(labels, todayData, avgData) {
+        if (barChart) barChart.destroy();
+        if (lineChart) lineChart.destroy();
 
-        hourlyChartInstance = new Chart(document.getElementById('hourlyChart'), {
+        // 1. กราฟวันนี้ (Bar Graph)
+        barChart = new Chart(document.getElementById('todayBarChart'), {
             type: 'bar',
             data: {
-                labels: hLabels,
-                datasets: [{ 
-                    label: 'การใช้ไฟของวันนี้แยกรายชั่วโมง (kWh)', 
-                    data: hData, 
-                    backgroundColor: '#3498db' 
+                labels: labels,
+                datasets: [{
+                    label: 'การใช้ไฟวันนี้ (kWh)',
+                    data: todayData,
+                    backgroundColor: 'rgba(52, 152, 219, 0.7)',
+                    borderColor: '#2980b9',
+                    borderWidth: 1
                 }]
             },
-            options: { 
-                responsive: true, 
-                maintainAspectRatio: false,
-                scales: {
-                    x: { ticks: { maxRotation: 45, minRotation: 45 } } // เอียงตัวอักษรแกน X เล็กน้อยเพื่อไม่ให้ซ้อนกัน
-                }
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { title: { display: true, text: 'ปริมาณการใช้ไฟรายชั่วโมง (วันนี้)' } }
             }
         });
 
-        weeklyChartInstance = new Chart(document.getElementById('weeklyChart'), {
-            type: 'bar',
+        // 2. กราฟค่าเฉลี่ย (Line Graph)
+        lineChart = new Chart(document.getElementById('averageLineChart'), {
+            type: 'line',
             data: {
-                labels: wLabels,
-                datasets: [{ label: 'ปริมาณการใช้ไฟรวมรายวัน (kWh)', data: wData, backgroundColor: '#2ecc71' }]
+                labels: labels,
+                datasets: [{
+                    label: 'ค่าเฉลี่ยการใช้ไฟรายชั่วโมง (kWh)',
+                    data: avgData,
+                    borderColor: '#2ecc71',
+                    backgroundColor: 'rgba(46, 204, 113, 0.1)',
+                    fill: true,
+                    tension: 0.4 // เส้นโค้ง
+                }]
             },
-            options: { responsive: true, maintainAspectRatio: false }
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { title: { display: true, text: 'แนวโน้มการใช้ไฟเฉลี่ยรายชั่วโมง (Load Profile)' } }
+            }
         });
     }
 
     fetchData();
-    setInterval(fetchData, 300000); // รีเฟรชทุก 5 นาที
+    setInterval(fetchData, 300000);
 </script>
-
 </body>
 </html>
