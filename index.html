@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nakornin Electricity Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; margin: 20px; }
+        .container { max-width: 1000px; margin: auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #2c3e50; }
+        .chart-container { margin-bottom: 40px; position: relative; height: 40vh; width: 100%; }
+        .stats { display: flex; justify-content: space-around; margin-bottom: 20px; text-align: center; }
+        .stat-box { padding: 15px; background: #ecf0f1; border-radius: 8px; flex: 1; margin: 0 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>ระบบมอนิเตอร์ไฟฟ้า 3 เฟส (PC473)</h1>
+    
+    <div class="stats">
+        <div class="stat-box">
+            <div>การใช้ไฟวันนี้</div>
+            <strong id="dailyUsage">-</strong> kWh
+        </div>
+        <div class="stat-box">
+            <div>กำลังไฟปัจจุบัน</div>
+            <strong id="currentPower">-</strong> W
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="hourlyChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="weeklyChart"></canvas>
+    </div>
+</div>
+
+<script>
+    const CSV_URL = 'https://docs.google.com/spreadsheets/d/1osCwgdGTiLuGRkHAMjHM9TJYSGJbrwCygC9h_Nrxoac'; // *** วาง URL ของคุณที่นี่ ***
+
+    async function fetchData() {
+        Papa.parse(CSV_URL, {
+            download: true,
+            header: true,
+            dynamicTyping: true,
+            complete: function(results) {
+                processData(results.data);
+            }
+        });
+    }
+
+    function processData(data) {
+        // กรองข้อมูลว่าง
+        const cleanData = data.filter(d => d.timestamp);
+        
+        // 1. ดึงข้อมูลล่าสุดแสดงใน Stat Box
+        const latest = cleanData[cleanData.length - 1];
+        document.getElementById('currentPower').innerText = latest['Total Power(W)'];
+        
+        // 2. เตรียมข้อมูลรายชั่วโมง (24 ชม. ล่าสุด)
+        const last24 = cleanData.slice(-24);
+        const hourlyLabels = last24.map(d => new Date(d.timestamp).getHours() + ':00');
+        const hourlyUsage = last24.map(d => d['Usage (kWh)']);
+
+        // 3. เตรียมข้อมูลรายสัปดาห์ (จันทร์-อาทิตย์)
+        const weekDays = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+        const weeklyData = [0, 0, 0, 0, 0, 0, 0];
+        const dayCount = [0, 0, 0, 0, 0, 0, 0];
+
+        cleanData.forEach(d => {
+            const date = new Date(d.timestamp);
+            const dayIndex = date.getDay();
+            weeklyData[dayIndex] += d['Usage (kWh)'];
+            dayCount[dayIndex]++;
+        });
+
+        // คำนวณเฉลี่ยรายวัน (ถ้าข้อมูลมีหลายสัปดาห์)
+        const weeklyAvg = weeklyData.map((sum, i) => dayCount[i] > 0 ? (sum / (dayCount[i]/24)).toFixed(2) : 0);
+        const todayUsage = weeklyData[new Date().getDay()].toFixed(2);
+        document.getElementById('dailyUsage').innerText = todayUsage;
+
+        renderCharts(hourlyLabels, hourlyUsage, weekDays, weeklyAvg);
+    }
+
+    function renderCharts(hLabels, hData, wLabels, wData) {
+        // Hourly Chart
+        new Chart(document.getElementById('hourlyChart'), {
+            type: 'bar',
+            data: {
+                labels: hLabels,
+                datasets: [{ label: 'การใช้ไฟรายชั่วโมง (kWh)', data: hData, backgroundColor: '#3498db' }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+
+        // Weekly Chart
+        new Chart(document.getElementById('weeklyChart'), {
+            type: 'bar',
+            data: {
+                labels: wLabels,
+                datasets: [{ label: 'ค่าเฉลี่ยการใช้ไฟรายวันในสัปดาห์ (kWh)', data: wData, backgroundColor: '#2ecc71' }]
+            },
+            options: { responsive: true, maintainAspectRatio: false }
+        });
+    }
+
+    fetchData();
+    setInterval(fetchData, 300000); // อัปเดตทุก 5 นาที
+</script>
+
+</body>
+</html>
