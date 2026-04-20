@@ -18,7 +18,7 @@
 <body>
 
 <div class="container">
-    <h1>ระบบมอนิเตอร์ไฟฟ้า 3 เฟส (Nakornin)</h1>
+    <h1>ระบบมอนิเตอร์ไฟฟ้า 3 เฟส (PC473)</h1>
     
     <div class="stats">
         <div class="stat-box">
@@ -44,18 +44,14 @@
     // *** สำคัญ: วาง URL ของคุณตรงนี้ ***
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQPE61vZhx8Fi4_SEQyWuk-aA7FHGryhx5ff_wIgxhpVWMxULlCRUGbgPwG17OTK4phtAHWdTZ7ik8h/pub?gid=0&single=true&output=csv'; 
 
-    // 🌟 ฟังก์ชันใหม่: ตัวแก้ปัญหา JavaScript อ่านวันที่แบบไทยไม่ออก 
     function parseCustomDate(dateStr) {
         if (!dateStr || typeof dateStr !== 'string') return new Date(NaN);
-        // แยกส่วน วันที่ และ เวลา ออกจากกัน (คั่นด้วยช่องว่าง)
         const parts = dateStr.split(' ');
         if (parts.length < 2) return new Date(NaN);
         
-        // แยก วัน/เดือน/ปี (เช่น 19/04/2026)
         const dateParts = parts[0].split('/');
         if (dateParts.length !== 3) return new Date(NaN);
         
-        // สลับตำแหน่งเป็น ปี-เดือน-วัน (2026-04-19T19:56:36) เพื่อให้ JS อ่านออก
         const isoString = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}T${parts[1]}`;
         return new Date(isoString);
     }
@@ -72,43 +68,55 @@
     }
 
     function processData(data) {
-        // กรองเอาเฉพาะแถวที่มีข้อมูล Date-Time
         const cleanData = data.filter(d => d['Date-Time'] != null && d['Date-Time'].toString().trim() !== "");
-        
         if(cleanData.length === 0) return;
 
-        // 1. ช่องสถิติด้านบน
+        // 1. ช่องสถิติด้านบน (ดึงแถวสุดท้าย)
         const latest = cleanData[cleanData.length - 1];
         document.getElementById('currentPower').innerText = latest['Total Power (W)'] || 0;
-        
-        // ปัดเศษจุดทศนิยม 2 ตำแหน่งให้สวยงาม
         let usageVal = latest['Usage (kWh)'] || 0;
         document.getElementById('currentUsage').innerText = typeof usageVal === 'number' ? usageVal.toFixed(2) : usageVal;
         
-        // 2. ข้อมูลกราฟรายชั่วโมง (24 แถวล่าสุด)
-        const last24 = cleanData.slice(-24);
-        const hourlyLabels = last24.map(d => {
-            const dateObj = parseCustomDate(d['Date-Time']); // ใช้ฟังก์ชันแปลงวันที่ที่เราสร้างขึ้น
-            return !isNaN(dateObj) ? dateObj.getHours() + ':00' : 'N/A';
-        });
-        const hourlyUsage = last24.map(d => d['Usage (kWh)'] || 0);
+        // --- 2. ลอจิกใหม่สำหรับกราฟรายชั่วโมง (0:00 - 23:00 ของวันนี้) ---
+        const now = new Date();
+        const todayString = now.toDateString(); // ดึงค่า "วันที่ปัจจุบัน" เพื่อไว้เทียบ
+        
+        // สร้าง Array รอรับข้อมูล 24 ชั่วโมง (0-23)
+        const hourlyLabels = Array.from({length: 24}, (_, i) => `${i}:00`);
+        const hourlyUsage = new Array(24).fill(0); // เติม 0 ไว้ก่อนทั้ง 24 ช่อง
 
-        // 3. ข้อมูลกราฟรายสัปดาห์ (แยกจันทร์-อาทิตย์)
+        cleanData.forEach(d => {
+            const dateObj = parseCustomDate(d['Date-Time']);
+            if(!isNaN(dateObj)) {
+                // เช็คว่าแถวนี้เป็นข้อมูลของ "วันนี้" หรือไม่
+                if(dateObj.toDateString() === todayString) {
+                    const hour = dateObj.getHours(); // ได้ค่า 0-23
+                    // เอา Usage ไปบวกเข้าช่องของชั่วโมงนั้นๆ 
+                    // (บวกสะสมไว้ เผื่อใน 1 ชม. มีหลายแถว)
+                    hourlyUsage[hour] += (d['Usage (kWh)'] || 0); 
+                }
+            }
+        });
+
+        // ปัดเศษทศนิยม 2 ตำแหน่งให้สวยงาม
+        const roundedHourlyUsage = hourlyUsage.map(val => Number(val.toFixed(2)));
+
+
+        // --- 3. ข้อมูลกราฟรายสัปดาห์ (แยกจันทร์-อาทิตย์) เหมือนเดิม ---
         const weekDays = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
         const weeklyData = [0, 0, 0, 0, 0, 0, 0];
 
         cleanData.forEach(d => {
-            const dateObj = parseCustomDate(d['Date-Time']); // ใช้ฟังก์ชันแปลงวันที่ที่เราสร้างขึ้น
+            const dateObj = parseCustomDate(d['Date-Time']);
             if(!isNaN(dateObj)) {
                 const dayIndex = dateObj.getDay();
                 weeklyData[dayIndex] += (d['Usage (kWh)'] || 0);
             }
         });
 
-        // ปัดเศษทศนิยม 2 ตำแหน่งให้แท่งกราฟ
         const roundedWeeklyData = weeklyData.map(val => Number(val.toFixed(2)));
 
-        renderCharts(hourlyLabels, hourlyUsage, weekDays, roundedWeeklyData);
+        renderCharts(hourlyLabels, roundedHourlyUsage, weekDays, roundedWeeklyData);
     }
 
     let hourlyChartInstance = null;
@@ -122,9 +130,19 @@
             type: 'bar',
             data: {
                 labels: hLabels,
-                datasets: [{ label: 'การใช้ไฟรายชั่วโมง (kWh)', data: hData, backgroundColor: '#3498db' }]
+                datasets: [{ 
+                    label: 'การใช้ไฟของวันนี้แยกรายชั่วโมง (kWh)', 
+                    data: hData, 
+                    backgroundColor: '#3498db' 
+                }]
             },
-            options: { responsive: true, maintainAspectRatio: false }
+            options: { 
+                responsive: true, 
+                maintainAspectRatio: false,
+                scales: {
+                    x: { ticks: { maxRotation: 45, minRotation: 45 } } // เอียงตัวอักษรแกน X เล็กน้อยเพื่อไม่ให้ซ้อนกัน
+                }
+            }
         });
 
         weeklyChartInstance = new Chart(document.getElementById('weeklyChart'), {
