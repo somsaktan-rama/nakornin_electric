@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard การใช้ไฟฟ้า Nakornin</title>
+    <title>Dashboard การใช้ไฟฟ้า (Nakornin)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <style>
@@ -54,67 +54,82 @@
     }
 
     function processData(data) {
-        const cleanData = data.filter(d => d['Date-Time']);
+        if (data.length === 0) return;
+
+        // --- Smart Key Finder: ค้นหาชื่อคอลัมน์อัตโนมัติป้องกัน Error เว้นวรรค ---
+        let dateKey, powerKey, usageKey;
+        const sampleRow = data[0];
+        for (let key in sampleRow) {
+            const lowerKey = key.toLowerCase().replace(/\s/g, ''); // ตัดช่องว่างออกให้หมดเพื่อเช็ค
+            if (lowerKey.includes('time') || lowerKey.includes('date')) dateKey = key;
+            if (lowerKey.includes('power')) powerKey = key;
+            if (lowerKey.includes('usage')) usageKey = key;
+        }
+
+        const cleanData = data.filter(d => d[dateKey]);
         if (cleanData.length === 0) return;
 
+        // อัปเดตช่อง "กำลังไฟปัจจุบัน" จากแถวสุดท้าย
         const latest = cleanData[cleanData.length - 1];
-        document.getElementById('currentPower').innerText = latest['Total Power (W)'] || 0;
+        document.getElementById('currentPower').innerText = latest[powerKey] !== undefined ? latest[powerKey] : 0;
 
         const now = new Date();
         const todayStr = now.toDateString();
-        
-        // หาค่าเริ่มต้นของสัปดาห์นี้ (วันอาทิตย์)
         const currentWeekStart = new Date(now);
         currentWeekStart.setDate(now.getDate() - now.getDay());
         currentWeekStart.setHours(0,0,0,0);
 
-        // --- ตัวแปรสำหรับกราฟ 24 ชั่วโมง ---
-        const hoursLabel = Array.from({length: 24}, (_, i) => i); // 0, 1, 2... 23
+        // ตัวแปรสำหรับกราฟ 24 ชั่วโมง
+        const hoursLabel = Array.from({length: 24}, (_, i) => i);
         const todayHourlyUsage = new Array(24).fill(0);
-        const sumHourly = new Array(24).fill(0);
-        const countHourly = new Array(24).fill(0);
+        const sumAvgHourly = new Array(24).fill(0);
+        const countAvgHourly = new Array(24).fill(0);
+        
+        // ตัวแปรเก็บค่า Power (W) เฉลี่ยรายชั่วโมงของวันนี้
+        const sumPowerHourly = new Array(24).fill(0);
+        const countPowerHourly = new Array(24).fill(0);
 
-        // --- ตัวแปรสำหรับกราฟ 7 วัน ---
         const weekDaysLabel = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
         const thisWeekUsage = new Array(7).fill(0);
-        
-        // ตัวแปรช่วยคำนวณค่าเฉลี่ยรายวัน
         const dailySums = {}; 
 
-        // วนลูปอ่านข้อมูลทั้งหมด
         cleanData.forEach(d => {
-            const date = parseDate(d['Date-Time']);
+            const date = parseDate(d[dateKey]);
             if (isNaN(date)) return;
             
-            const val = d['Usage (kWh)'] || 0;
+            const valUsage = d[usageKey] || 0;
+            const valPower = d[powerKey] || 0;
             const h = date.getHours();
             const day = date.getDay();
             const dateOnly = date.toDateString();
 
-            // 1. เก็บข้อมูลรายชั่วโมง
+            // ข้อมูลของวันนี้ (แยกรายชั่วโมง)
             if (dateOnly === todayStr) {
-                todayHourlyUsage[h] += val;
+                todayHourlyUsage[h] += valUsage;
+                sumPowerHourly[h] += valPower;
+                countPowerHourly[h]++;
             }
-            sumHourly[h] += val;
-            countHourly[h]++;
 
-            // 2. เก็บข้อมูลรายวัน (รวมยอดของแต่ละวัน)
+            // ค่าเฉลี่ยการใช้ไฟ (kWh) จากประวัติทั้งหมด
+            sumAvgHourly[h] += valUsage;
+            countAvgHourly[h]++;
+
+            // ข้อมูลรายวัน
             if (!dailySums[dateOnly]) dailySums[dateOnly] = { dayIndex: day, total: 0 };
-            dailySums[dateOnly].total += val;
+            dailySums[dateOnly].total += valUsage;
 
-            // ตรวจสอบว่าเป็นข้อมูลของสัปดาห์นี้หรือไม่
             if (date >= currentWeekStart) {
-                thisWeekUsage[day] += val;
+                thisWeekUsage[day] += valUsage;
             }
         });
 
-        // คำนวณค่าเฉลี่ยรายชั่วโมง
-        const avgHourlyUsage = sumHourly.map((sum, i) => countHourly[i] > 0 ? Number((sum / countHourly[i]).toFixed(2)) : 0);
+        const avgHourlyUsage = sumAvgHourly.map((sum, i) => countAvgHourly[i] > 0 ? Number((sum / countAvgHourly[i]).toFixed(2)) : 0);
+        
+        // คำนวณ Power เฉลี่ยในแต่ละชั่วโมง (ใช้ null เพื่อให้กราฟข้ามชั่วโมงที่ยังไม่ถึงไป ไม่ให้ตกลงไปที่ 0)
+        const todayHourlyPower = sumPowerHourly.map((sum, i) => countPowerHourly[i] > 0 ? Number((sum / countPowerHourly[i]).toFixed(2)) : null);
 
-        // คำนวณค่าเฉลี่ยรายสัปดาห์ (หาผลรวมแต่ละวันในสัปดาห์ แล้วหารด้วยจำนวนสัปดาห์ที่มีข้อมูล)
         const sumWeekDays = new Array(7).fill(0);
         const countWeekDays = new Array(7).fill(0);
-        
         for (const dateKey in dailySums) {
             const dData = dailySums[dateKey];
             sumWeekDays[dData.dayIndex] += dData.total;
@@ -122,74 +137,86 @@
         }
         const avgWeeklyUsage = sumWeekDays.map((sum, i) => countWeekDays[i] > 0 ? Number((sum / countWeekDays[i]).toFixed(2)) : 0);
 
-        // อัปเดตตัวเลขรวมด้านบน
         document.getElementById('todayTotal').innerText = todayHourlyUsage.reduce((a, b) => a + b, 0).toFixed(2);
 
-        renderCharts(hoursLabel, todayHourlyUsage, avgHourlyUsage, weekDaysLabel, thisWeekUsage, avgWeeklyUsage);
+        renderCharts(hoursLabel, todayHourlyUsage, avgHourlyUsage, todayHourlyPower, weekDaysLabel, thisWeekUsage, avgWeeklyUsage);
     }
 
     let hourlyChart, weeklyChart;
 
-    function renderCharts(hLabels, todayHourly, avgHourly, wLabels, thisWeek, avgWeek) {
+    function renderCharts(hLabels, todayHourly, avgHourly, todayPower, wLabels, thisWeek, avgWeek) {
         if (hourlyChart) hourlyChart.destroy();
         if (weeklyChart) weeklyChart.destroy();
 
-        // 1. กราฟรายชั่วโมง (Mixed Chart: Bar + Line)
+        // 1. กราฟรายชั่วโมง (มี 2 แกน Y)
         hourlyChart = new Chart(document.getElementById('hourlyMixedChart'), {
-            type: 'bar', // Base type
+            type: 'bar',
             data: {
                 labels: hLabels,
                 datasets: [
                     {
                         type: 'line',
-                        label: 'ค่าเฉลี่ยรายชั่วโมง (kWh)',
-                        data: avgHourly,
-                        borderColor: '#e74c3c', // สีแดง
+                        label: 'Total Power ของวันนี้ (W)',
+                        data: todayPower,
+                        borderColor: '#9b59b6', // สีม่วง
                         backgroundColor: 'transparent',
                         borderWidth: 2,
-                        tension: 0.4, // เส้นโค้ง
-                        order: 1 // ให้อยู่ด้านหน้า
+                        yAxisID: 'y1', // ผูกกับแกน Y ด้านขวา
+                        spanGaps: true, // ข้ามช่วงที่ไม่มีข้อมูลไปเลย
+                        order: 0
+                    },
+                    {
+                        type: 'line',
+                        label: 'ค่าเฉลี่ยรายชั่วโมง (kWh)',
+                        data: avgHourly,
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        tension: 0.4,
+                        yAxisID: 'y', // ผูกกับแกน Y ด้านซ้าย
+                        order: 1
                     },
                     {
                         type: 'bar',
                         label: 'การใช้ไฟวันนี้ (kWh)',
                         data: todayHourly,
-                        backgroundColor: 'rgba(52, 152, 219, 0.8)', // สีฟ้า
-                        borderRadius: 4,
-                        order: 2 // ให้อยู่ด้านหลัง
+                        backgroundColor: 'rgba(52, 152, 219, 0.8)',
+                        yAxisID: 'y', // ผูกกับแกน Y ด้านซ้าย
+                        order: 2
                     }
                 ]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
-                plugins: { title: { display: true, text: 'เปรียบเทียบการใช้ไฟรายชั่วโมง (วันนี้ vs ค่าเฉลี่ย)', font: { size: 16 } } },
-                scales: { y: { beginAtZero: true } }
+                plugins: { title: { display: true, text: 'เปรียบเทียบการใช้ไฟและกำลังไฟฟ้า (รายชั่วโมง)', font: { size: 16 } } },
+                scales: { 
+                    y: { 
+                        type: 'linear', position: 'left', beginAtZero: true,
+                        title: { display: true, text: 'พลังงาน (kWh)' }
+                    },
+                    y1: { 
+                        type: 'linear', position: 'right',
+                        title: { display: true, text: 'กำลังไฟฟ้า (W)' },
+                        grid: { drawOnChartArea: false } // ป้องกันเส้นกริดของ 2 แกนตีกัน
+                    }
+                }
             }
         });
 
-        // 2. กราฟรายสัปดาห์ (Mixed Chart: Bar + Line)
+        // 2. กราฟรายสัปดาห์
         weeklyChart = new Chart(document.getElementById('weeklyMixedChart'), {
-            type: 'bar', // Base type
+            type: 'bar',
             data: {
                 labels: wLabels,
                 datasets: [
                     {
-                        type: 'line',
-                        label: 'ค่าเฉลี่ยรายวัน (kWh)',
-                        data: avgWeek,
-                        borderColor: '#f39c12', // สีส้ม
-                        backgroundColor: 'transparent',
-                        borderWidth: 2,
-                        tension: 0.4,
-                        order: 1
+                        type: 'line', label: 'ค่าเฉลี่ยรายวัน (kWh)', data: avgWeek,
+                        borderColor: '#f39c12', backgroundColor: 'transparent',
+                        borderWidth: 2, tension: 0.4, order: 1
                     },
                     {
-                        type: 'bar',
-                        label: 'การใช้ไฟสัปดาห์นี้ (kWh)',
-                        data: thisWeek,
-                        backgroundColor: 'rgba(46, 204, 113, 0.8)', // สีเขียว
-                        borderRadius: 4,
-                        order: 2
+                        type: 'bar', label: 'การใช้ไฟสัปดาห์นี้ (kWh)', data: thisWeek,
+                        backgroundColor: 'rgba(46, 204, 113, 0.8)', borderRadius: 4, order: 2
                     }
                 ]
             },
