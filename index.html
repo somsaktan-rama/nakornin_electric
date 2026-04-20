@@ -18,7 +18,7 @@
 <body>
 
 <div class="container">
-    <h1>ระบบมอนิเตอร์ไฟฟ้า 3 เฟส (PC473)</h1>
+    <h1>ระบบมอนิเตอร์ไฟฟ้า 3 เฟส (Nakornin)</h1>
     
     <div class="stats">
         <div class="stat-box">
@@ -41,8 +41,24 @@
 </div>
 
 <script>
-    // *** สำคัญ: วาง URL ตรงนี้ และต้องมีเครื่องหมาย ' ครอบหัวท้าย ***
+    // *** สำคัญ: วาง URL ของคุณตรงนี้ ***
     const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQPE61vZhx8Fi4_SEQyWuk-aA7FHGryhx5ff_wIgxhpVWMxULlCRUGbgPwG17OTK4phtAHWdTZ7ik8h/pub?gid=0&single=true&output=csv'; 
+
+    // 🌟 ฟังก์ชันใหม่: ตัวแก้ปัญหา JavaScript อ่านวันที่แบบไทยไม่ออก 
+    function parseCustomDate(dateStr) {
+        if (!dateStr || typeof dateStr !== 'string') return new Date(NaN);
+        // แยกส่วน วันที่ และ เวลา ออกจากกัน (คั่นด้วยช่องว่าง)
+        const parts = dateStr.split(' ');
+        if (parts.length < 2) return new Date(NaN);
+        
+        // แยก วัน/เดือน/ปี (เช่น 19/04/2026)
+        const dateParts = parts[0].split('/');
+        if (dateParts.length !== 3) return new Date(NaN);
+        
+        // สลับตำแหน่งเป็น ปี-เดือน-วัน (2026-04-19T19:56:36) เพื่อให้ JS อ่านออก
+        const isoString = `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}T${parts[1]}`;
+        return new Date(isoString);
+    }
 
     async function fetchData() {
         Papa.parse(CSV_URL, {
@@ -50,60 +66,55 @@
             header: true,
             dynamicTyping: true,
             complete: function(results) {
-                console.log("ดึงข้อมูลสำเร็จ: ", results.data); // ดูข้อมูลดิบใน Console
                 processData(results.data);
-            },
-            error: function(error) {
-                console.error("เกิดข้อผิดพลาดในการดึง CSV: ", error);
             }
         });
     }
 
     function processData(data) {
-        // กรองเฉพาะแถวที่มีข้อมูล Date-Time จริงๆ (ป้องกันแถวว่าง)
-        // *** หาก Sheet ของคุณใช้ชื่อคอลัมน์อื่น ให้เปลี่ยนคำว่า Date-Time ด้านล่างนี้ ***
-        const cleanData = data.filter(d => d['Date-Time'] != null);
+        // กรองเอาเฉพาะแถวที่มีข้อมูล Date-Time
+        const cleanData = data.filter(d => d['Date-Time'] != null && d['Date-Time'].toString().trim() !== "");
         
-        if(cleanData.length === 0) {
-            console.warn("ไม่พบข้อมูล หรือชื่อคอลัมน์ไม่ตรง");
-            return;
-        }
+        if(cleanData.length === 0) return;
 
-        // 1. ดึงข้อมูลแถวสุดท้าย (ล่าสุด) มาแสดงในช่องสถิติ
+        // 1. ช่องสถิติด้านบน
         const latest = cleanData[cleanData.length - 1];
-        
-        // *** ตรวจสอบชื่อคอลัมน์ให้ตรงกับใน Google Sheets ของคุณ ***
         document.getElementById('currentPower').innerText = latest['Total Power (W)'] || 0;
-        document.getElementById('currentUsage').innerText = latest['Usage (kWh)'] || 0;
         
-        // 2. กราฟรายชั่วโมง (ดึง 24 แถวล่าสุด)
+        // ปัดเศษจุดทศนิยม 2 ตำแหน่งให้สวยงาม
+        let usageVal = latest['Usage (kWh)'] || 0;
+        document.getElementById('currentUsage').innerText = typeof usageVal === 'number' ? usageVal.toFixed(2) : usageVal;
+        
+        // 2. ข้อมูลกราฟรายชั่วโมง (24 แถวล่าสุด)
         const last24 = cleanData.slice(-24);
         const hourlyLabels = last24.map(d => {
-            const dateObj = new Date(d['Date-Time']);
+            const dateObj = parseCustomDate(d['Date-Time']); // ใช้ฟังก์ชันแปลงวันที่ที่เราสร้างขึ้น
             return !isNaN(dateObj) ? dateObj.getHours() + ':00' : 'N/A';
         });
         const hourlyUsage = last24.map(d => d['Usage (kWh)'] || 0);
 
-        // 3. กราฟรายสัปดาห์ (จันทร์-อาทิตย์)
+        // 3. ข้อมูลกราฟรายสัปดาห์ (แยกจันทร์-อาทิตย์)
         const weekDays = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
         const weeklyData = [0, 0, 0, 0, 0, 0, 0];
 
         cleanData.forEach(d => {
-            const dateObj = new Date(d['Date-Time']);
+            const dateObj = parseCustomDate(d['Date-Time']); // ใช้ฟังก์ชันแปลงวันที่ที่เราสร้างขึ้น
             if(!isNaN(dateObj)) {
                 const dayIndex = dateObj.getDay();
                 weeklyData[dayIndex] += (d['Usage (kWh)'] || 0);
             }
         });
 
-        renderCharts(hourlyLabels, hourlyUsage, weekDays, weeklyData);
+        // ปัดเศษทศนิยม 2 ตำแหน่งให้แท่งกราฟ
+        const roundedWeeklyData = weeklyData.map(val => Number(val.toFixed(2)));
+
+        renderCharts(hourlyLabels, hourlyUsage, weekDays, roundedWeeklyData);
     }
 
     let hourlyChartInstance = null;
     let weeklyChartInstance = null;
 
     function renderCharts(hLabels, hData, wLabels, wData) {
-        // ทำลายกราฟเก่าก่อนวาดใหม่ (ป้องกันการวาดซ้อนเมื่อ Auto-update)
         if(hourlyChartInstance) hourlyChartInstance.destroy();
         if(weeklyChartInstance) weeklyChartInstance.destroy();
 
@@ -111,7 +122,7 @@
             type: 'bar',
             data: {
                 labels: hLabels,
-                datasets: [{ label: 'การใช้ไฟรอบล่าสุด (kWh)', data: hData, backgroundColor: '#3498db' }]
+                datasets: [{ label: 'การใช้ไฟรายชั่วโมง (kWh)', data: hData, backgroundColor: '#3498db' }]
             },
             options: { responsive: true, maintainAspectRatio: false }
         });
@@ -127,7 +138,7 @@
     }
 
     fetchData();
-    setInterval(fetchData, 300000); // อัปเดตทุก 5 นาที
+    setInterval(fetchData, 300000); // รีเฟรชทุก 5 นาที
 </script>
 
 </body>
