@@ -3,67 +3,81 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ประวัติการใช้ไฟฟ้า Nakornin</title>
+    <title>ระบบวิเคราะห์การใช้ไฟฟ้า (E_PC473)</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
     <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #f0f2f5; margin: 20px; }
-        .container { max-width: 1100px; margin: auto; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-        .header-section { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; flex-wrap: wrap; gap: 15px; }
-        .chart-container { height: 500px; width: 100%; margin-top: 20px; }
-        select { padding: 10px 15px; border-radius: 8px; border: 1px solid #ddd; font-size: 16px; cursor: pointer; outline: none; }
-        .stats { display: flex; gap: 20px; margin-bottom: 20px; }
-        .stat-box { flex: 1; padding: 15px; background: #f8f9fa; border-radius: 10px; text-align: center; border-left: 5px solid #1a73e8; }
-        .stat-box small { color: #666; display: block; }
-        .stat-box strong { font-size: 20px; color: #1a73e8; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; margin: 20px; }
+        .container { max-width: 1200px; margin: auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 5px 15px rgba(0,0,0,0.08); }
+        .header-section { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 15px; border-bottom: 2px solid #f0f0f0; padding-bottom: 15px; }
+        h2 { color: #2c3e50; margin: 0; }
+        select { padding: 10px 15px; border-radius: 8px; border: 1px solid #ced4da; font-size: 16px; cursor: pointer; background-color: #fff; outline: none; min-width: 250px; }
+        .stats { display: flex; gap: 20px; margin-bottom: 30px; flex-wrap: wrap; }
+        .stat-box { flex: 1; min-width: 200px; padding: 20px; background: #f8f9fa; border-radius: 10px; text-align: center; border-left: 5px solid #3498db; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        .stat-box small { color: #7f8c8d; font-size: 14px; display: block; margin-bottom: 5px; }
+        .stat-box strong { font-size: 28px; color: #2c3e50; }
+        .chart-container { height: 500px; width: 100%; position: relative; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div class="header-section">
-        <h2>วิเคราะห์ประวัติไฟฟ้า รายวัน-พ.ศ.</h2>
+        <h2>📊 ประวัติการใช้ไฟฟ้า Nakornin</h2>
         <select id="dateSelect" onchange="updateView()">
             <option value="">กำลังโหลดข้อมูล...</option>
         </select>
     </div>
 
     <div class="stats">
-        <div class="stat-box"><small>ใช้ไฟรวมวันที่เลือก</small><strong id="selectedTotal">0.00</strong> kWh</div>
-        <div class="stat-box"><small>กำลังไฟเฉลี่ยวันที่เลือก</small><strong id="avgPower">0</strong> W</div>
+        <div class="stat-box"><small>ปริมาณไฟฟ้ารวม (วันที่เลือก)</small><strong id="dailyUsage">0.00</strong> kWh</div>
+        <div class="stat-box"><small>กำลังไฟฟ้าเฉลี่ย (วันที่เลือก)</small><strong id="dailyAvgPower">0</strong> W</div>
     </div>
 
     <div class="chart-container">
-        <canvas id="mainMixedChart"></canvas>
+        <canvas id="mainChart"></canvas>
     </div>
 </div>
 
 <script>
-    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQPE61vZhx8Fi4_SEQyWuk-aA7FHGryhx5ff_wIgxhpVWMxULlCRUGbgPwG17OTK4phtAHWdTZ7ik8h/pub?gid=0&single=true&output=csv'; // *** วาง URL ของคุณที่นี่ ***
+    // ==========================================
+    // 1. ใส่ URL ของ CSV ที่ได้จาก Google Sheets ที่นี่
+    // ==========================================
+    const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQPE61vZhx8Fi4_SEQyWuk-aA7FHGryhx5ff_wIgxhpVWMxULlCRUGbgPwG17OTK4phtAHWdTZ7ik8h/pub?gid=0&single=true&output=csv'; 
+
     let allData = [];
     let groupedData = {};
     let globalAvgHourly = new Array(24).fill(0);
-    let mainChart;
+    let chartInstance = null;
 
+    // ฟังก์ชันแปลงวันที่แบบ DD/MM/YYYY HH:MM:SS ให้ JavaScript อ่านออก
     function parseDate(dateStr) {
-        if (!dateStr) return new Date(NaN);
+        if (!dateStr || typeof dateStr !== 'string') return new Date(NaN);
         const parts = dateStr.split(' ');
+        if (parts.length < 2) return new Date(NaN);
         const d = parts[0].split('/');
+        if (d.length !== 3) return new Date(NaN);
         return new Date(`${d[2]}-${d[1]}-${d[0]}T${parts[1]}`);
     }
 
+    // ดึงข้อมูลเมื่อเปิดหน้าเว็บ
     async function fetchData() {
         Papa.parse(CSV_URL, {
-            download: true, header: true, dynamicTyping: true,
+            download: true, 
+            header: true, 
+            dynamicTyping: true,
             complete: function(results) { 
                 allData = results.data;
-                initializeDashboard();
+                processData();
             }
         });
     }
 
-    function initializeDashboard() {
-        // ค้นหาคีย์คอลัมน์อัตโนมัติ
+    // ประมวลผลและจัดกลุ่มข้อมูล
+    function processData() {
+        if (!allData || allData.length === 0) return;
+
+        // ระบบค้นหาชื่อคอลัมน์อัตโนมัติ (ป้องกันปัญหาเคาะวรรคผิดใน Sheet)
         let dateKey, usageKey, powerKey;
         for (let key in allData[0]) {
             let k = key.toLowerCase().replace(/\s/g, '');
@@ -72,39 +86,52 @@
             if (k.includes('power')) powerKey = key;
         }
 
-        const sumHourly = new Array(24).fill(0);
-        const countHourly = new Array(24).fill(0);
+        const sumGlobalUsage = new Array(24).fill(0);
+        const countGlobalUsage = new Array(24).fill(0);
         groupedData = {};
 
+        // วนลูปอ่านข้อมูลทุกแถว
         allData.forEach(d => {
-            const date = parseDate(d[dateKey]);
-            if (isNaN(date)) return;
+            if (!d[dateKey]) return;
+            const dateObj = parseDate(d[dateKey]);
+            if (isNaN(dateObj)) return;
 
-            // จัดกลุ่มตามวันที่รูปแบบไทย พ.ศ.
-            const dateLabel = date.toLocaleDateString('th-TH', { 
-                weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' 
-            });
-            const h = date.getHours();
+            const h = dateObj.getHours(); // 0 - 23
             const usage = d[usageKey] || 0;
             const power = d[powerKey] || 0;
 
+            // สร้างชื่อวันที่ภาษาไทย พ.ศ. (เช่น วันจันทร์ที่ 20 เมษายน 2569)
+            const dateLabel = dateObj.toLocaleDateString('th-TH', { 
+                weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' 
+            });
+
+            // สร้างกลุ่มข้อมูลใหม่หากยังไม่มีวันนั้นๆ
             if (!groupedData[dateLabel]) {
-                groupedData[dateLabel] = { hourlyUsage: new Array(24).fill(0), hourlyPower: new Array(24).fill(0), count: new Array(24).fill(0), rawDate: date };
+                groupedData[dateLabel] = { 
+                    hourlyUsage: new Array(24).fill(0), 
+                    hourlyPowerSum: new Array(24).fill(0), 
+                    hourlyPowerCount: new Array(24).fill(0), 
+                    rawDate: dateObj // เก็บไว้ใช้เรียงลำดับ
+                };
             }
             
+            // นำข้อมูลหยอดลงชั่วโมงของวันนั้นๆ
             groupedData[dateLabel].hourlyUsage[h] += usage;
-            groupedData[dateLabel].hourlyPower[h] += power;
-            groupedData[dateLabel].count[h]++;
+            groupedData[dateLabel].hourlyPowerSum[h] += power;
+            groupedData[dateLabel].hourlyPowerCount[h]++;
 
-            // คำนวณค่าเฉลี่ยรายชั่วโมงรวม (Global Average)
-            sumHourly[h] += usage;
-            countHourly[h]++;
+            // คำนวณค่าเฉลี่ยรายชั่วโมงสำหรับประวัติทั้งหมด (Global)
+            sumGlobalUsage[h] += usage;
+            countGlobalUsage[h]++;
         });
 
-        globalAvgHourly = sumHourly.map((sum, i) => countHourly[i] > 0 ? (sum / (countHourly[i]/24)).toFixed(2) : 0);
+        // คำนวณเป็นเส้นค่าเฉลี่ย Global
+        globalAvgHourly = sumGlobalUsage.map((sum, i) => countGlobalUsage[i] > 0 ? Number((sum / countGlobalUsage[i]).toFixed(2)) : 0);
 
-        // สร้างรายการเลือกวันที่ (เรียงจากใหม่สุดไปเก่าสุด)
+        // นำวันที่มาเรียงลำดับจาก ล่าสุด -> เก่าสุด
         const sortedDates = Object.keys(groupedData).sort((a, b) => groupedData[b].rawDate - groupedData[a].rawDate);
+        
+        // อัปเดต Dropdown
         const select = document.getElementById('dateSelect');
         select.innerHTML = '';
         sortedDates.forEach(date => {
@@ -114,61 +141,131 @@
             select.appendChild(opt);
         });
 
+        // สั่งให้วาดกราฟของวันแรกสุด (ล่าสุด) ทันที
         updateView();
     }
 
+    // ฟังก์ชันอัปเดตหน้าจอเมื่อมีการเลือก Dropdown
     function updateView() {
         const selectedDate = document.getElementById('dateSelect').value;
         const data = groupedData[selectedDate];
         if (!data) return;
 
+        // คำนวณ Usage รวมของวันนั้น
         const totalUsage = data.hourlyUsage.reduce((a, b) => a + b, 0);
-        document.getElementById('selectedTotal').innerText = totalUsage.toFixed(2);
+        document.getElementById('dailyUsage').innerText = totalUsage.toFixed(2);
         
-        const totalPowerAvg = data.hourlyPower.reduce((a, b) => a + b, 0) / data.hourlyPower.length;
-        document.getElementById('avgPower').innerText = totalPowerAvg.toFixed(0);
+        // คำนวณ Power เฉลี่ยของวันนั้น
+        let totalPowerSum = 0;
+        let totalPowerCount = 0;
+        
+        // แปลงผลรวม Power ในแต่ละชั่วโมง ให้เป็นค่าเฉลี่ยของชั่วโมงนั้นๆ
+        const avgHourlyPower = data.hourlyPowerSum.map((sum, i) => {
+            if (data.hourlyPowerCount[i] > 0) {
+                totalPowerSum += sum;
+                totalPowerCount += data.hourlyPowerCount[i];
+                return Number((sum / data.hourlyPowerCount[i]).toFixed(0));
+            }
+            return null; // ถ้าชั่วโมงไหนยังไม่มีข้อมูล ให้กราฟขาดช่วง ไม่ตกลงไปที่ 0
+        });
 
-        renderMixedChart(selectedDate, data.hourlyUsage, globalAvgHourly);
+        const dailyAvgPower = totalPowerCount > 0 ? (totalPowerSum / totalPowerCount) : 0;
+        document.getElementById('dailyAvgPower').innerText = dailyAvgPower.toFixed(0);
+
+        // วาดกราฟใหม่
+        renderChart(selectedDate, data.hourlyUsage, avgHourlyPower, globalAvgHourly);
     }
 
-    function renderMixedChart(dateLabel, todayData, avgData) {
-        if (mainChart) mainChart.destroy();
+    // ฟังก์ชันวาดกราฟ (Mixed Chart & Dual Axis)
+    function renderChart(dateLabel, usageData, powerData, globalAvgData) {
+        if (chartInstance) chartInstance.destroy();
 
-        mainChart = new Chart(document.getElementById('mainMixedChart'), {
+        const xLabels = Array.from({length: 24}, (_, i) => i); // แกน X: 0 - 23
+
+        chartInstance = new Chart(document.getElementById('mainChart'), {
             data: {
-                labels: Array.from({length: 24}, (_, i) => i),
+                labels: xLabels,
                 datasets: [
                     {
                         type: 'line',
-                        label: 'ค่าเฉลี่ยรายชั่วโมง (kWh)',
-                        data: avgData,
-                        borderColor: '#e74c3c',
+                        label: 'กำลังไฟฟ้า (Total Power) - W',
+                        data: powerData,
+                        borderColor: '#9b59b6', // สีม่วง
+                        backgroundColor: 'transparent',
+                        borderWidth: 2,
+                        tension: 0.2,
+                        spanGaps: true,
+                        yAxisID: 'yRight', // ผูกสเกลขวา
+                        order: 0 // ให้อยู่หน้าสุด
+                    },
+                    {
+                        type: 'line',
+                        label: 'ค่าเฉลี่ยประวัติการใช้ไฟ - kWh',
+                        data: globalAvgData,
+                        borderColor: '#e74c3c', // สีแดง
+                        backgroundColor: 'transparent',
                         borderWidth: 2,
                         tension: 0.4,
-                        fill: false,
+                        borderDash: [5, 5], // ทำให้เป็นเส้นประ
+                        yAxisID: 'yLeft', // ผูกสเกลซ้าย
                         order: 1
                     },
                     {
                         type: 'bar',
-                        label: `การใช้ไฟ (${dateLabel}) (kWh)`,
-                        data: todayData,
-                        backgroundColor: 'rgba(26, 115, 232, 0.7)',
-                        borderRadius: 5,
-                        order: 2
+                        label: `การใช้ไฟฟ้า (${dateLabel}) - kWh`,
+                        data: usageData,
+                        backgroundColor: 'rgba(52, 152, 219, 0.75)', // สีฟ้า
+                        borderRadius: 4,
+                        yAxisID: 'yLeft', // ผูกสเกลซ้าย
+                        order: 2 // ให้อยู่หลังสุด
                     }
                 ]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                scales: { 
-                    y: { beginAtZero: true, title: { display: true, text: 'หน่วย (kWh)' } },
-                    x: { title: { display: true, text: 'ชั่วโมง (0-23)' } }
+                interaction: { mode: 'index', intersect: false }, // ตั้งค่าให้ชี้เมาส์แล้วดูข้อมูลได้ง่ายขึ้น
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            // เติมหน่วยต่อท้ายตอนชี้เมาส์
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) { label = label.split('-')[0].trim() + ': '; }
+                                if (context.parsed.y !== null) {
+                                    label += context.parsed.y + (context.dataset.yAxisID === 'yRight' ? ' W' : ' kWh');
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: { display: true, text: 'เวลา (ชั่วโมง)' },
+                        grid: { display: false }
+                    },
+                    yLeft: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: { display: true, text: 'ปริมาณไฟฟ้า (kWh)', color: '#2980b9' },
+                        ticks: { color: '#2980b9' }
+                    },
+                    yRight: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: { display: true, text: 'กำลังไฟฟ้า (W)', color: '#8e44ad' },
+                        ticks: { color: '#8e44ad' },
+                        grid: { drawOnChartArea: false } // ป้องกันเส้นตารางทับซ้อนกัน
+                    }
                 }
             }
         });
     }
 
+    // เรียกฟังก์ชันดึงข้อมูลเมื่อโหลดเว็บเสร็จ
     fetchData();
 </script>
 </body>
